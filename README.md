@@ -25,9 +25,9 @@ Host-wide log aggregation for Coolify-deployed apps.
 ## Deploy on Coolify
 
 1. **New Application** → Build Pack: **Docker Compose**.
-2. Source: same repo as zabari (`Base Directory: /loki-stack`) **or** push this folder to its own repo.
+2. Source: this repo (`Base Directory: /`).
 3. **Environment** panel — copy `.env.example` keys, set:
-   - `GRAFANA_DOMAIN=grafana.zabari.net` (or whatever)
+   - `GRAFANA_DOMAIN=logs.cloudfrog.cc`
    - `GRAFANA_ADMIN_USER=admin`
    - `GRAFANA_ADMIN_PASSWORD=<strong>`
 4. **Domains** — point `${GRAFANA_DOMAIN}` at this app (Coolify provisions TLS via Traefik labels in compose).

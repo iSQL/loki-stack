@@ -3,7 +3,7 @@
 #
 # Deploy on Coolify as a new application:
 #   Build Pack: Docker Compose
-#   Base Directory: /loki-stack   (or leave at / if you split this to its own repo)
+#   Base Directory: /
 #   Domain: ${GRAFANA_DOMAIN}     (only Grafana is exposed; Loki stays internal)
 # ─────────────────────────────────────────────────────────────────────────
 
