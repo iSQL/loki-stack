@@ -1,0 +1,19 @@
+# Secrets — never commit. Use .env.example as the shared template instead.
+.env
+.env.local
+.env.*.local
+
+# Editor cruft
+.vscode/
+.idea/
+*.swp
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Stray log files (none expected — Loki/Alloy/Grafana store in named volumes)
+*.log
+
+# Coolify sometimes drops a deploy temp dir; ignore defensively.
+.coolify/

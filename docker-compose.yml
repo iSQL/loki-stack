@@ -1,0 +1,89 @@
+# ─────────────────────────────────────────────────────────────────────────
+# Loki + Grafana + Alloy stack (host-wide log aggregation)
+#
+# Deploy on Coolify as a new application:
+#   Build Pack: Docker Compose
+#   Base Directory: /loki-stack   (or leave at / if you split this to its own repo)
+#   Domain: ${GRAFANA_DOMAIN}     (only Grafana is exposed; Loki stays internal)
+# ─────────────────────────────────────────────────────────────────────────
+
+services:
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./loki/config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    # Internal only — no Traefik label, no host port. Reachable as `loki:3100`
+    # from other containers on the default network.
+    networks:
+      - default
+      - coolify
+
+  alloy:
+    image: grafana/alloy:v1.5.1
+    container_name: alloy
+    restart: unless-stopped
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --disable-reporting
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+      # Host bind: every app on this Coolify host drops its rolling files into
+      # /var/lib/coolify/storage/logs/<app>/. Read-only mount so a runaway
+      # collector can't truncate someone's logs.
+      - /var/lib/coolify/storage/logs:/var/log/apps:ro
+    depends_on:
+      - loki
+    networks:
+      - default
+      - coolify
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: https://${GRAFANA_DOMAIN:-grafana.localhost}
+      # Disable usage analytics phone-home.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - loki
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`${GRAFANA_DOMAIN:-grafana.localhost}`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls=true"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    networks:
+      - default
+      - coolify
+
+volumes:
+  loki-data:
+  alloy-data:
+  grafana-data:
+
+# `coolify` is the external overlay network Coolify creates host-wide. Attaching
+# makes cross-app reach possible (e.g. if other apps ever scrape Loki directly).
+# The `default` network is the implicit per-stack network where Grafana ↔ Loki
+# ↔ Alloy talk to each other by container name.
+networks:
+  coolify:
+    external: true
+    name: coolify

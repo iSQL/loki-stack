@@ -1,0 +1,61 @@
+# Loki single-binary mode — sve role (distributor, ingester, querier, compactor)
+# u jednom procesu. Dovoljno za nekoliko aplikacija; ako budeš skalirao preko
+# ~50 GB/dan, prebaci se na microservices ili SimpleScalable mod.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9095
+  log_level: info
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+# TSDB index na disk. v13 šema je standard za Loki 3.x.
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # Retencija ponaša se kao kompletni keep-window: chunks i index stariji od
+  # ovog perioda compactor briše. Promeni i restart-uj — primeni se odmah.
+  retention_period: 30d
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  # Structured metadata (Loki 3.x) — dozvoljava attaching non-index fields
+  # na log line (npr. trace_id) bez label kardinaliteta.
+  allow_structured_metadata: true
+  # Per-tenant ingestion limit. Single-binary, single-tenant default je dovoljan.
+  ingestion_rate_mb: 16
+  ingestion_burst_size_mb: 32
+
+compactor:
+  working_directory: /loki/compactor
+  # Retention only radi ako compactor radi. delete_request_store treba za
+  # API-driven delete; bezopasno postavljen na filesystem.
+  retention_enabled: true
+  delete_request_store: filesystem
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 50
+
+ruler:
+  alertmanager_url: ""
+
+# Onemogući anonymous usage analytics phone-home na grafana.com.
+analytics:
+  reporting_enabled: false

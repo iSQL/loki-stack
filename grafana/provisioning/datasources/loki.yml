@@ -1,0 +1,18 @@
+# Provisions the Loki data source automatically on Grafana startup so you
+# don't have to click through the UI on every fresh container. `editable:true`
+# lets you tweak in the UI; changes persist in /var/lib/grafana until you
+# rebuild the container (then this file wins again).
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    # Compose-internal hostname — Grafana and Loki share the default network.
+    url: http://loki:3100
+    isDefault: true
+    editable: true
+    jsonData:
+      # Cap default explore-view fetches; raise if you write big queries.
+      maxLines: 1000
+      timeout: 60

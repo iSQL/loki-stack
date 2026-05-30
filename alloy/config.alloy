@@ -1,0 +1,74 @@
+// ─────────────────────────────────────────────────────────────────────────
+// Grafana Alloy — log collector
+// Tails files on the host at /var/log/apps/<app>/*.log (bind-mounted from
+// /var/lib/coolify/storage/logs in docker-compose.yml), parses Pino JSON,
+// promotes app + level to labels, and ships to Loki.
+// ─────────────────────────────────────────────────────────────────────────
+
+// Discover every *.log under each <app>/ subdirectory. Each file becomes a
+// distinct target; Alloy tails them concurrently with checkpoints saved in
+// its own persistent storage path (see --storage.path in docker-compose).
+local.file_match "apps" {
+  path_targets = [
+    {__path__ = "/var/log/apps/*/*.log"},
+  ]
+}
+
+// Tail discovered files, forward raw lines to the processing pipeline.
+loki.source.file "apps" {
+  targets    = local.file_match.apps.targets
+  forward_to = [loki.process.apps.receiver]
+}
+
+// Processing pipeline. Stages run top-to-bottom per line, mutating an
+// "extracted" map that subsequent stages can promote into Loki labels.
+loki.process "apps" {
+  forward_to = [loki.write.default.receiver]
+
+  // Extract the <app> directory name out of the filename label. Adds
+  // extracted["app"] = "zabari" for /var/log/apps/zabari/zabari2026-05-30.log
+  stage.regex {
+    expression = "/var/log/apps/(?P<app>[^/]+)/[^/]+\\.log$"
+    source     = "filename"
+  }
+
+  // Pino emits JSON lines: {"level":30,"time":1716998400000,"msg":"...",...}
+  // Pull out the fields we want as searchable labels / for the timestamp.
+  stage.json {
+    expressions = {
+      level = "level",
+      msg   = "msg",
+      time  = "time",
+    }
+  }
+
+  // Map Pino's numeric level → human label. Don't add `msg` as a label
+  // (high cardinality), only as the log line body.
+  stage.template {
+    source   = "level_name"
+    template = "{{ if eq .level \"10\" }}trace{{ else if eq .level \"20\" }}debug{{ else if eq .level \"30\" }}info{{ else if eq .level \"40\" }}warn{{ else if eq .level \"50\" }}error{{ else if eq .level \"60\" }}fatal{{ else }}unknown{{ end }}"
+  }
+
+  stage.labels {
+    values = {
+      app   = "app",
+      level = "level_name",
+    }
+  }
+
+  // Use the in-payload Pino timestamp (unix ms) as the log time. Without
+  // this, Loki would stamp lines with ingest time, which drifts under load
+  // and breaks correlation across services.
+  stage.timestamp {
+    source = "time"
+    format = "UnixMs"
+  }
+}
+
+// Ship to Loki via its push API. `loki:3100` resolves over the compose
+// default network — Loki must be on the same Docker network.
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
