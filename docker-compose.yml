@@ -6,22 +6,20 @@
 #   Base Directory: /
 #   Domain: ${GRAFANA_DOMAIN}     (only Grafana is exposed; Loki stays internal)
 #
-# Read-only config files are exposed via Compose `configs:` (not bind mounts)
-# because Coolify rewrites relative `./path` bind sources to its own per-app
-# persistent storage, which on first deploy is an empty directory — Alloy
-# then fails to mount a directory onto a file inside the container. `configs:`
-# entries are read by Compose itself at deploy time from the project directory.
+# Each service builds from its own subdirectory. Configs are baked into the
+# image rather than bind-mounted because Coolify's build container doesn't
+# share filesystem paths with the host docker daemon — both `./file` bind
+# mounts and Compose `configs: file:` references end up unreachable at
+# `docker compose up` time. See ./loki/Dockerfile for the longer note.
 # ─────────────────────────────────────────────────────────────────────────
 
 services:
   loki:
-    image: grafana/loki:3.3.2
+    build:
+      context: ./loki
     container_name: loki
     restart: unless-stopped
     command: -config.file=/etc/loki/config.yml
-    configs:
-      - source: loki_config
-        target: /etc/loki/config.yml
     volumes:
       - loki-data:/loki
     # Internal only — no Traefik label, no host port. Reachable as `loki:3100`
@@ -31,7 +29,8 @@ services:
       - coolify
 
   alloy:
-    image: grafana/alloy:v1.5.1
+    build:
+      context: ./alloy
     container_name: alloy
     restart: unless-stopped
     command:
@@ -40,9 +39,6 @@ services:
       - --storage.path=/var/lib/alloy/data
       - --server.http.listen-addr=0.0.0.0:12345
       - --disable-reporting
-    configs:
-      - source: alloy_config
-        target: /etc/alloy/config.alloy
     volumes:
       - alloy-data:/var/lib/alloy/data
       # Host bind: every app on this Coolify host drops its rolling files into
@@ -57,7 +53,8 @@ services:
       - coolify
 
   grafana:
-    image: grafana/grafana:11.4.0
+    build:
+      context: ./grafana
     container_name: grafana
     restart: unless-stopped
     environment:
@@ -69,9 +66,6 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
-    configs:
-      - source: grafana_loki_datasource
-        target: /etc/grafana/provisioning/datasources/loki.yml
     volumes:
       - grafana-data:/var/lib/grafana
     depends_on:
@@ -91,17 +85,6 @@ volumes:
   loki-data:
   alloy-data:
   grafana-data:
-
-# Loaded from the repo at deploy time. To add more Grafana provisioning files
-# later (dashboards, alert rules), add a new `configs:` entry plus a matching
-# `target:` under the `grafana` service.
-configs:
-  loki_config:
-    file: ./loki/config.yml
-  alloy_config:
-    file: ./alloy/config.alloy
-  grafana_loki_datasource:
-    file: ./grafana/provisioning/datasources/loki.yml
 
 # `coolify` is the external overlay network Coolify creates host-wide. Attaching
 # makes cross-app reach possible (e.g. if other apps ever scrape Loki directly).

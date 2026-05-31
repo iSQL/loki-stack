@@ -14,13 +14,15 @@ Host-wide log aggregation for Coolify-deployed apps.
 
 ## Layout
 
-| File                                              | Purpose                          |
-|---------------------------------------------------|----------------------------------|
-| `docker-compose.yml`                              | Stack definition + Traefik label |
-| `loki/config.yml`                                 | Single-binary, 30-day retention  |
-| `alloy/config.alloy`                              | Tail + parse + ship to Loki      |
-| `grafana/provisioning/datasources/loki.yml`       | Auto-wire Loki on Grafana boot   |
-| `.env.example`                                    | Required env vars                |
+| File                                              | Purpose                                |
+|---------------------------------------------------|----------------------------------------|
+| `docker-compose.yml`                              | Stack definition + Traefik label       |
+| `loki/Dockerfile`, `loki/config.yml`              | Loki image with single-binary config   |
+| `alloy/Dockerfile`, `alloy/config.alloy`          | Alloy image with tail/parse pipeline   |
+| `grafana/Dockerfile`, `grafana/provisioning/...`  | Grafana image with Loki datasource     |
+| `.env.example`                                    | Required env vars                      |
+
+Each service builds from its own subdirectory rather than bind-mounting a config file from the repo. This is a deliberate Coolify workaround: Coolify's build container clones the repo into its own filesystem and then invokes `docker compose up` against the host daemon — relative bind mount sources and `configs: file:` references both resolve to paths the host daemon can't see. Baking configs into per-service images via `COPY` keeps deploys repo-driven without needing the Coolify Storages UI per file.
 
 ## Deploy on Coolify
 
