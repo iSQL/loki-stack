@@ -6,6 +6,9 @@ apiVersion: 1
 
 datasources:
   - name: Loki
+    # Fixed UID so provisioned dashboards can reference this datasource
+    # by a stable id instead of Grafana's auto-generated UID.
+    uid: loki
     type: loki
     access: proxy
     # Compose-internal hostname — Grafana and Loki share the default network.

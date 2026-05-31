@@ -1,0 +1,17 @@
+# Tells Grafana to load any *.json file from this directory as a dashboard.
+# updateIntervalSeconds=10 → if you `docker cp` a new JSON into the running
+# container during dev, Grafana picks it up in <10s. In production it just
+# loads on container start (Dockerfile bakes the files in).
+apiVersion: 1
+
+providers:
+  - name: 'default'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

@@ -19,7 +19,7 @@ Host-wide log aggregation for Coolify-deployed apps.
 | `docker-compose.yml`                              | Stack definition + Traefik label       |
 | `loki/Dockerfile`, `loki/config.yml`              | Loki image with single-binary config   |
 | `alloy/Dockerfile`, `alloy/config.alloy`          | Alloy image with tail/parse pipeline   |
-| `grafana/Dockerfile`, `grafana/provisioning/...`  | Grafana image with Loki datasource     |
+| `grafana/Dockerfile`, `grafana/provisioning/...`  | Grafana image: Loki datasource + dashboards |
 | `.env.example`                                    | Required env vars                      |
 
 Each service builds from its own subdirectory rather than bind-mounting a config file from the repo. This is a deliberate Coolify workaround: Coolify's build container clones the repo into its own filesystem and then invokes `docker compose up` against the host daemon — relative bind mount sources and `configs: file:` references both resolve to paths the host daemon can't see. Baking configs into per-service images via `COPY` keeps deploys repo-driven without needing the Coolify Storages UI per file.
@@ -93,6 +93,36 @@ Useful queries to bookmark in Grafana:
 # user registrations
 {app="zabari"} |= "user registered" | json | line_format "{{.email}}"
 ```
+
+## Dashboards
+
+Anything checked into [`grafana/provisioning/dashboards/`](grafana/provisioning/dashboards/) is auto-loaded at Grafana boot. Add a new dashboard by exporting its JSON from the UI (Dashboard settings → JSON Model) and dropping it next to the existing files — next deploy bakes it into the Grafana image.
+
+Out of the box:
+
+- **Zabari — Overview** ([`zabari-overview.json`](grafana/provisioning/dashboards/zabari-overview.json)) — 5 panels: lines/sec, error rate %, registrations (24h), stacked volume by level, recent errors. Has an `$app` template variable, so it works for any app that ships logs to Loki, not just zabari.
+
+## Alerting (Grafana managed)
+
+Single tenant + low ingestion volume = Grafana built-in alerting is enough; an Alertmanager sidecar would be over-architected. To add a rule:
+
+1. **Alerting → Alert rules → New alert rule** → type **Grafana managed**.
+2. **Query A**: pick Loki datasource, paste the LogQL that returns the metric value (e.g. error rate). Pick query type **Instant** for ratios, **Range** if you want per-step values.
+3. **Expression B**: type **Threshold**, set `IS ABOVE 0.05` (5%), input `A`.
+4. **Alert condition**: `B`.
+5. **Folder**: `Zabari` (create on first use). **Evaluation group**: `zabari` with `Interval: 1m`. **For**: `5m` (don't fire on transients).
+6. **Annotations + labels**: `summary = Error rate above 5%`, `severity = warning`, `app = zabari`.
+7. **Contact point**: configure once under **Contact points** (email/Slack/webhook). Default policy delivers all rules unless you carve specific ones out.
+
+Suggested first rules (LogQL given, threshold suggested):
+
+| Rule | Query | Threshold | For |
+|---|---|---|---|
+| Error rate spike | `sum(count_over_time({app="zabari", level=~"error\|fatal\|critical"}[5m])) / sum(count_over_time({app="zabari"}[5m]))` | `> 0.05` | 5m |
+| No logs (zabari down?) | `sum(count_over_time({app="zabari"}[5m]))` | `< 1` | 5m |
+| Fatal in last minute | `sum(count_over_time({app="zabari", level=~"fatal"}[1m]))` | `>= 1` | 0m |
+
+Once a rule is stable in the UI, **Export → YAML** and commit the result under `grafana/provisioning/alerting/` for future replay.
 
 ## Retention + sizing
 
