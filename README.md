@@ -61,13 +61,20 @@ Alloy auto-discovers the new `<your-app>/*.log` files on next scan (`local.file_
 
 ## What Alloy extracts
 
-For each line of Pino JSON (`{"level":30,"time":1716998400000,"msg":"...",...}`):
+Supports JSON log lines from either logger out of the box:
+
+- **Pino** (Node/Fastify): `{"level":30,"time":1716998400000,"msg":"..."}`
+- **Monolog** (Laravel): `{"level":400,"level_name":"ERROR","datetime":"2026-05-31T14:23:01.123456+00:00","message":"..."}`
+
+Extraction:
 
 - **Stream labels** (low cardinality, indexed):
   - `app` — from the path segment
-  - `level` — `info|warn|error|...` (translated from Pino's numeric `level`)
+  - `level` — normalized to `trace|debug|info|warn|error|fatal` (Monolog's `WARNING` → `warn`, `EMERGENCY` → `fatal`; unknown → `unknown`)
 - **Body** — the raw JSON, so all fields stay queryable via `| json` parser.
-- **Timestamp** — from the in-payload `time` (unix ms), not ingest time.
+- **Timestamp** — from the in-payload `time` (Pino, unix ms) or `datetime` (Monolog, ISO 8601). Falls back to ingest time only if neither is present.
+
+Onboarding a new app that uses a different JSON shape: either map it onto one of these two field sets in the app's logger config, or add a third pair of extractions in [`alloy/config.alloy`](alloy/config.alloy).
 
 Useful queries to bookmark in Grafana:
 

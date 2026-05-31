@@ -1,8 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────────
 // Grafana Alloy — log collector
 // Tails files on the host at /var/log/apps/<app>/*.log (bind-mounted from
-// /var/lib/coolify/storage/logs in docker-compose.yml), parses Pino JSON,
-// promotes app + level to labels, and ships to Loki.
+// /var/lib/coolify/storage/logs in docker-compose.yml), parses Pino or
+// Monolog JSON, promotes app + level to labels, and ships to Loki.
 // ─────────────────────────────────────────────────────────────────────────
 
 // Discover every *.log under each <app>/ subdirectory. Each file becomes a
@@ -32,21 +32,30 @@ loki.process "apps" {
     source     = "filename"
   }
 
-  // Pino emits JSON lines: {"level":30,"time":1716998400000,"msg":"...",...}
-  // Pull out the fields we want as searchable labels / for the timestamp.
+  // Both Pino (Node/Fastify) and Monolog (Laravel) emit JSON lines but with
+  // different field names. Extract both candidate sets — only one will be
+  // populated per line:
+  //
+  //   Pino    : {"level":50,"time":1716998400000,"msg":"..."}
+  //   Monolog : {"level":400,"level_name":"ERROR","datetime":"2026-05-31T14:23:01.123456+00:00","message":"..."}
+  //
+  // `level` exists in both (numeric, but different scales). `level_name`
+  // only exists in Monolog — we use its presence as the discriminator.
   stage.json {
     expressions = {
-      level = "level",
-      msg   = "msg",
-      time  = "time",
+      level         = "level",
+      level_name_in = "level_name",
+      pino_time     = "time",
+      mono_datetime = "datetime",
     }
   }
 
-  // Map Pino's numeric level → human label. Don't add `msg` as a label
-  // (high cardinality), only as the log line body.
+  // Normalize to a lowercase level name shared across loggers. For Monolog
+  // also map WARNING→warn and EMERGENCY→fatal so LogQL queries don't have
+  // to special-case each app's vocabulary.
   stage.template {
     source   = "level_name"
-    template = "{{ if eq .level \"10\" }}trace{{ else if eq .level \"20\" }}debug{{ else if eq .level \"30\" }}info{{ else if eq .level \"40\" }}warn{{ else if eq .level \"50\" }}error{{ else if eq .level \"60\" }}fatal{{ else }}unknown{{ end }}"
+    template = "{{ if .level_name_in }}{{ $n := .level_name_in | lower }}{{ if eq $n \"warning\" }}warn{{ else if eq $n \"emergency\" }}fatal{{ else }}{{ $n }}{{ end }}{{ else if eq .level \"10\" }}trace{{ else if eq .level \"20\" }}debug{{ else if eq .level \"30\" }}info{{ else if eq .level \"40\" }}warn{{ else if eq .level \"50\" }}error{{ else if eq .level \"60\" }}fatal{{ else }}unknown{{ end }}"
   }
 
   stage.labels {
@@ -56,12 +65,19 @@ loki.process "apps" {
     }
   }
 
-  // Use the in-payload Pino timestamp (unix ms) as the log time. Without
-  // this, Loki would stamp lines with ingest time, which drifts under load
-  // and breaks correlation across services.
+  // Use the in-payload timestamp when available so Loki stores log time
+  // (not ingest time) — keeps cross-service correlation accurate under load.
+  // Two stages; each is a no-op when its source field is absent.
   stage.timestamp {
-    source = "time"
-    format = "UnixMs"
+    source            = "pino_time"
+    format            = "UnixMs"
+    action_on_failure = "skip"
+  }
+
+  stage.timestamp {
+    source            = "mono_datetime"
+    format            = "RFC3339Nano"
+    action_on_failure = "skip"
   }
 }
 
